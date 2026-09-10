@@ -1,6 +1,7 @@
 using UnityEngine;
 
-// Abre la puerta automaticamente cuando el jugador se acerca y la cierra al alejarse.
+// Abre la puerta automaticamente cuando el jugador se acerca y la cierra al alejarse,
+// con una animacion suave (aceleracion/desaceleracion).
 // Se puede arrastrar este script sobre cualquier puerta en el Inspector, o dejar que
 // AutoPuertas.cs lo asigne solo a todas las puertas de la escena.
 public class opendoor : MonoBehaviour
@@ -9,8 +10,8 @@ public class opendoor : MonoBehaviour
     [Tooltip("Cuanto y en que direccion se desplaza la puerta al abrirse (coordenadas locales).")]
     public Vector3 desplazamiento = new Vector3(1.5f, 0f, 0f); // Se mueve en el eje X
 
-    [Tooltip("Velocidad de apertura/cierre en unidades por segundo.")]
-    public float velocidad = 3.0f;
+    [Tooltip("Duracion aproximada de la animacion de apertura/cierre en segundos. Mas alto = mas lento y suave.")]
+    public float duracionApertura = 1.0f;
 
     [Header("Deteccion del jugador")]
     [Tooltip("Distancia (en unidades) a la que la puerta empieza a abrirse.")]
@@ -21,12 +22,15 @@ public class opendoor : MonoBehaviour
 
     [Header("Diagnostico")]
     [Tooltip("Muestra en la Consola la distancia al jugador y el estado de la puerta.")]
-    public bool debug = true;
+    public bool debug = false;
 
     private Vector3 posicionCerrada;
     private Vector3 posicionAbierta;
     private bool estaAbierta = false;
     private Renderer[] renderers;
+
+    private float apertura = 0f;     // 0 = cerrada, 1 = abierta
+    private float aperturaVel = 0f;  // velocidad interna para SmoothDamp
 
     void Start()
     {
@@ -64,10 +68,12 @@ public class opendoor : MonoBehaviour
         if (debug && (antes != estaAbierta || Time.frameCount % 30 == 0))
             Debug.Log($"[opendoor] '{name}': distancia={distancia:F2} umbral={distanciaApertura} abierta={estaAbierta}");
 
-        Vector3 objetivo = estaAbierta ? posicionAbierta : posicionCerrada;
+        // Animacion suave: 'apertura' avanza hacia 1 (abierta) o 0 (cerrada) con
+        // aceleracion y desaceleracion naturales gracias a SmoothDamp.
+        float objetivo = estaAbierta ? 1f : 0f;
+        apertura = Mathf.SmoothDamp(apertura, objetivo, ref aperturaVel, duracionApertura);
 
-        // Movimiento suave hacia la posicion objetivo (abierta o cerrada).
-        transform.localPosition = Vector3.MoveTowards(transform.localPosition, objetivo, velocidad * Time.deltaTime);
+        transform.localPosition = Vector3.Lerp(posicionCerrada, posicionAbierta, apertura);
     }
 
     // Centro real de la puerta segun las mallas visibles (no el pivot del objeto).
