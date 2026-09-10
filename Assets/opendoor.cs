@@ -13,15 +13,20 @@ public class opendoor : MonoBehaviour
     public float velocidad = 3.0f;
 
     [Header("Deteccion del jugador")]
-    [Tooltip("Distancia (en metros) a la que la puerta empieza a abrirse.")]
+    [Tooltip("Distancia (en unidades) a la que la puerta empieza a abrirse.")]
     public float distanciaApertura = 3.0f;
 
-    [Tooltip("Transform del jugador. Si se deja vacio se usa la camara principal (VR) automaticamente.")]
+    [Tooltip("Transform del jugador. Si se deja vacio se busca la camara automaticamente.")]
     public Transform jugador;
+
+    [Header("Diagnostico")]
+    [Tooltip("Muestra en la Consola la distancia al jugador y el estado de la puerta.")]
+    public bool debug = true;
 
     private Vector3 posicionCerrada;
     private Vector3 posicionAbierta;
     private bool estaAbierta = false;
+    private Renderer[] renderers;
 
     void Start()
     {
@@ -29,8 +34,17 @@ public class opendoor : MonoBehaviour
         posicionCerrada = transform.localPosition;
         posicionAbierta = posicionCerrada + desplazamiento;
 
+        // Cacheamos las mallas (pueden estar en objetos hijos) para calcular el
+        // centro REAL de la puerta, ya que en modelos Revit el pivot suele estar
+        // en el origen del mundo y no donde se ve la puerta.
+        renderers = GetComponentsInChildren<Renderer>(true);
+
         if (jugador == null)
             jugador = BuscarJugador();
+
+        if (debug)
+            Debug.Log($"[opendoor] '{name}': mallas encontradas={renderers.Length}, " +
+                      $"jugador={(jugador != null ? jugador.name : "NULL")}");
     }
 
     void Update()
@@ -42,9 +56,13 @@ public class opendoor : MonoBehaviour
             if (jugador == null) return;
         }
 
-        // La puerta se abre si el jugador esta dentro del radio, y se cierra si se aleja.
-        float distancia = Vector3.Distance(transform.position, jugador.position);
+        // Distancia desde el centro visible de la puerta hasta el jugador.
+        float distancia = Vector3.Distance(CentroPuerta(), jugador.position);
+        bool antes = estaAbierta;
         estaAbierta = distancia <= distanciaApertura;
+
+        if (debug && (antes != estaAbierta || Time.frameCount % 30 == 0))
+            Debug.Log($"[opendoor] '{name}': distancia={distancia:F2} umbral={distanciaApertura} abierta={estaAbierta}");
 
         Vector3 objetivo = estaAbierta ? posicionAbierta : posicionCerrada;
 
@@ -52,12 +70,29 @@ public class opendoor : MonoBehaviour
         transform.localPosition = Vector3.MoveTowards(transform.localPosition, objetivo, velocidad * Time.deltaTime);
     }
 
-    // Localiza al jugador: primero la camara principal (CenterEyeAnchor del OVR),
-    // y si no existe, cualquier objeto con la etiqueta "Player".
+    // Centro real de la puerta segun las mallas visibles (no el pivot del objeto).
+    private Vector3 CentroPuerta()
+    {
+        if (renderers == null || renderers.Length == 0)
+            return transform.position;
+
+        Bounds b = renderers[0].bounds;
+        for (int i = 1; i < renderers.Length; i++)
+            b.Encapsulate(renderers[i].bounds);
+        return b.center;
+    }
+
+    // Localiza al jugador: camara principal (si esta etiquetada MainCamera), si no
+    // cualquier camara de la escena (el ojo central del rig VR), y por ultimo un
+    // objeto con la etiqueta "Player".
     private Transform BuscarJugador()
     {
         if (Camera.main != null)
             return Camera.main.transform;
+
+        Camera cam = FindAnyObjectByType<Camera>();
+        if (cam != null)
+            return cam.transform;
 
         GameObject porTag = GameObject.FindGameObjectWithTag("Player");
         if (porTag != null)
