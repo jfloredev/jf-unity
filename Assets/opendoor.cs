@@ -1,17 +1,21 @@
 using UnityEngine;
 
-// Abre la puerta automaticamente cuando el jugador se acerca y la cierra al alejarse,
-// con una animacion suave (aceleracion/desaceleracion).
-// Se puede arrastrar este script sobre cualquier puerta en el Inspector, o dejar que
-// AutoPuertas.cs lo asigne solo a todas las puertas de la escena.
+// Abre la puerta como una puerta batiente real: gira sobre una bisagra en su borde
+// y se abre hacia el lado contrario al jugador, con animacion suave.
+// Funciona aunque el pivot del objeto este en el origen del mundo (modelos Revit),
+// porque la rotacion se hace alrededor de un punto de bisagra calculado en el borde
+// real de la malla, no alrededor del pivot.
 public class opendoor : MonoBehaviour
 {
-    [Header("Movimiento de apertura")]
-    [Tooltip("Cuanto y en que direccion se desplaza la puerta al abrirse (coordenadas locales).")]
-    public Vector3 desplazamiento = new Vector3(1.5f, 0f, 0f); // Se mueve en el eje X
+    [Header("Apertura")]
+    [Tooltip("Angulo maximo de apertura de la puerta, en grados.")]
+    public float anguloApertura = 90f;
 
-    [Tooltip("Duracion aproximada de la animacion de apertura/cierre en segundos. Mas alto = mas lento y suave.")]
+    [Tooltip("Duracion aproximada de la animacion en segundos. Mas alto = mas lento y suave.")]
     public float duracionApertura = 1.0f;
+
+    [Tooltip("Invierte el sentido de giro si la puerta abre hacia el lado equivocado.")]
+    public bool invertirGiro = false;
 
     [Header("Deteccion del jugador")]
     [Tooltip("Distancia (en unidades) a la que la puerta empieza a abrirse.")]
@@ -21,76 +25,124 @@ public class opendoor : MonoBehaviour
     public Transform jugador;
 
     [Header("Diagnostico")]
-    [Tooltip("Muestra en la Consola la distancia al jugador y el estado de la puerta.")]
     public bool debug = false;
 
-    private Vector3 posicionCerrada;
-    private Vector3 posicionAbierta;
-    private bool estaAbierta = false;
     private Renderer[] renderers;
+    private Vector3 centroReferencia; // centro de la puerta cerrada (para medir distancia)
+    private Vector3 puntoBisagra;     // punto del mundo sobre el que gira la puerta
+    private Vector3 bordeLibre;       // borde opuesto a la bisagra (para decidir el sentido)
+    private Vector3 normalPared;      // eje que atraviesa el hueco de la puerta
 
-    private float apertura = 0f;     // 0 = cerrada, 1 = abierta
-    private float aperturaVel = 0f;  // velocidad interna para SmoothDamp
+    private bool estaAbierta = false;
+    private bool sentidoCalculado = false;
+    private float signo = 1f;         // sentido de giro (+/-)
+
+    private float apertura = 0f;      // 0 = cerrada, 1 = abierta
+    private float aperturaVel = 0f;   // velocidad interna para SmoothDamp
+    private float anguloActual = 0f;  // grados ya aplicados a la puerta
 
     void Start()
     {
-        // Guardamos la posicion inicial exacta al arrancar el juego.
-        posicionCerrada = transform.localPosition;
-        posicionAbierta = posicionCerrada + desplazamiento;
-
-        // Cacheamos las mallas (pueden estar en objetos hijos) para calcular el
-        // centro REAL de la puerta, ya que en modelos Revit el pivot suele estar
-        // en el origen del mundo y no donde se ve la puerta.
+        // Mallas de la puerta (pueden estar en objetos hijos).
         renderers = GetComponentsInChildren<Renderer>(true);
+
+        // Bounds reales de la puerta en el mundo.
+        Bounds b = CalcularBounds();
+        centroReferencia = b.center;
+
+        // El lado mas ancho (en horizontal) es el ancho de la puerta; la bisagra va
+        // en un extremo de ese ancho, y el eje perpendicular atraviesa el hueco.
+        Vector3 ejeAncho;
+        float mitadAncho;
+        if (b.size.x >= b.size.z)
+        {
+            ejeAncho = Vector3.right;
+            mitadAncho = b.extents.x;
+            normalPared = Vector3.forward;
+        }
+        else
+        {
+            ejeAncho = Vector3.forward;
+            mitadAncho = b.extents.z;
+            normalPared = Vector3.right;
+        }
+
+        puntoBisagra = b.center - ejeAncho * mitadAncho; // un borde vertical de la puerta
+        bordeLibre = b.center + ejeAncho * mitadAncho;    // el borde opuesto
 
         if (jugador == null)
             jugador = BuscarJugador();
 
         if (debug)
-            Debug.Log($"[opendoor] '{name}': mallas encontradas={renderers.Length}, " +
-                      $"jugador={(jugador != null ? jugador.name : "NULL")}");
+            Debug.Log($"[opendoor] '{name}': mallas={renderers.Length}, " +
+                      $"jugador={(jugador != null ? jugador.name : "NULL")}, bisagra={puntoBisagra}");
     }
 
     void Update()
     {
-        // Si aun no tenemos referencia al jugador, intentamos localizarlo de nuevo.
         if (jugador == null)
         {
             jugador = BuscarJugador();
             if (jugador == null) return;
         }
 
-        // Distancia desde el centro visible de la puerta hasta el jugador.
-        float distancia = Vector3.Distance(CentroPuerta(), jugador.position);
+        // Calcula una sola vez hacia que lado debe abrir (alejandose del jugador).
+        if (!sentidoCalculado)
+            CalcularSentido();
+
+        // La puerta se abre si el jugador esta dentro del radio, medido desde el
+        // centro de la puerta CERRADA (fijo, para que no oscile al abrirse).
+        float distancia = Vector3.Distance(centroReferencia, jugador.position);
         bool antes = estaAbierta;
         estaAbierta = distancia <= distanciaApertura;
 
         if (debug && (antes != estaAbierta || Time.frameCount % 30 == 0))
             Debug.Log($"[opendoor] '{name}': distancia={distancia:F2} umbral={distanciaApertura} abierta={estaAbierta}");
 
-        // Animacion suave: 'apertura' avanza hacia 1 (abierta) o 0 (cerrada) con
-        // aceleracion y desaceleracion naturales gracias a SmoothDamp.
+        // Progreso suave 0..1 con aceleracion y desaceleracion naturales.
         float objetivo = estaAbierta ? 1f : 0f;
         apertura = Mathf.SmoothDamp(apertura, objetivo, ref aperturaVel, duracionApertura);
 
-        transform.localPosition = Vector3.Lerp(posicionCerrada, posicionAbierta, apertura);
+        // Aplica solo la diferencia de angulo de este frame, girando sobre la bisagra.
+        float anguloDeseado = signo * anguloApertura * apertura;
+        float delta = anguloDeseado - anguloActual;
+        if (Mathf.Abs(delta) > 0.0001f)
+        {
+            transform.RotateAround(puntoBisagra, Vector3.up, delta);
+            anguloActual = anguloDeseado;
+        }
     }
 
-    // Centro real de la puerta segun las mallas visibles (no el pivot del objeto).
-    private Vector3 CentroPuerta()
+    // Decide el sentido de giro para que el borde libre se aleje del jugador.
+    private void CalcularSentido()
+    {
+        Vector3 rotado = RotarPunto(bordeLibre, puntoBisagra, Vector3.up, anguloApertura);
+        float mueveHaciaNormal = Vector3.Dot(rotado - bordeLibre, normalPared);
+        float jugadorEnNormal = Vector3.Dot(jugador.position - centroReferencia, normalPared);
+
+        // Si al girar +angulo el borde libre iria hacia el mismo lado que el jugador,
+        // invertimos para que abra hacia el lado contrario.
+        signo = (Mathf.Sign(mueveHaciaNormal) == Mathf.Sign(jugadorEnNormal)) ? -1f : 1f;
+        if (invertirGiro) signo = -signo;
+        sentidoCalculado = true;
+    }
+
+    private static Vector3 RotarPunto(Vector3 punto, Vector3 pivote, Vector3 eje, float grados)
+    {
+        return pivote + Quaternion.AngleAxis(grados, eje) * (punto - pivote);
+    }
+
+    private Bounds CalcularBounds()
     {
         if (renderers == null || renderers.Length == 0)
-            return transform.position;
+            return new Bounds(transform.position, Vector3.one);
 
         Bounds b = renderers[0].bounds;
         for (int i = 1; i < renderers.Length; i++)
             b.Encapsulate(renderers[i].bounds);
-        return b.center;
+        return b;
     }
 
-    // Localiza al jugador: camara principal (si esta etiquetada MainCamera), si no
-    // cualquier camara de la escena (el ojo central del rig VR), y por ultimo un
-    // objeto con la etiqueta "Player".
     private Transform BuscarJugador()
     {
         if (Camera.main != null)
