@@ -1,10 +1,10 @@
 using UnityEngine;
 
 // Abre la puerta como una puerta batiente real: gira sobre una bisagra en su borde
-// y se abre hacia el lado contrario al jugador, con animacion suave.
-// Funciona aunque el pivot del objeto este en el origen del mundo (modelos Revit),
-// porque la rotacion se hace alrededor de un punto de bisagra calculado en el borde
-// real de la malla, no alrededor del pivot.
+// y SIEMPRE se abre hacia el lado contrario al jugador, sin importar por donde llegue,
+// con animacion suave. Funciona aunque el pivot del objeto este en el origen del mundo
+// (modelos Revit), porque la rotacion se hace alrededor de un punto de bisagra calculado
+// en el borde real de la malla, no alrededor del pivot.
 public class opendoor : MonoBehaviour
 {
     [Header("Apertura")]
@@ -14,8 +14,8 @@ public class opendoor : MonoBehaviour
     [Tooltip("Duracion aproximada de la animacion en segundos. Mas alto = mas lento y suave.")]
     public float duracionApertura = 1.0f;
 
-    [Tooltip("Invierte el sentido de giro si la puerta abre hacia el lado equivocado.")]
-    public bool invertirGiro = false;
+    [Tooltip("Coloca la bisagra en el borde opuesto (si la puerta gira desde el lado equivocado).")]
+    public bool bisagraOtroLado = false;
 
     [Header("Deteccion del jugador")]
     [Tooltip("Distancia (en unidades) a la que la puerta empieza a abrirse.")]
@@ -34,8 +34,7 @@ public class opendoor : MonoBehaviour
     private Vector3 normalPared;      // eje que atraviesa el hueco de la puerta
 
     private bool estaAbierta = false;
-    private bool sentidoCalculado = false;
-    private float signo = 1f;         // sentido de giro (+/-)
+    private float signo = 1f;         // sentido de giro (+/-), se recalcula en cada apertura
 
     private float apertura = 0f;      // 0 = cerrada, 1 = abierta
     private float aperturaVel = 0f;   // velocidad interna para SmoothDamp
@@ -67,8 +66,11 @@ public class opendoor : MonoBehaviour
             normalPared = Vector3.right;
         }
 
-        puntoBisagra = b.center - ejeAncho * mitadAncho; // un borde vertical de la puerta
-        bordeLibre = b.center + ejeAncho * mitadAncho;    // el borde opuesto
+        // Bisagra en un borde vertical de la puerta (o el opuesto si se pide).
+        Vector3 bordeA = b.center - ejeAncho * mitadAncho;
+        Vector3 bordeB = b.center + ejeAncho * mitadAncho;
+        puntoBisagra = bisagraOtroLado ? bordeB : bordeA;
+        bordeLibre = bisagraOtroLado ? bordeA : bordeB;
 
         if (jugador == null)
             jugador = BuscarJugador();
@@ -86,18 +88,19 @@ public class opendoor : MonoBehaviour
             if (jugador == null) return;
         }
 
-        // Calcula una sola vez hacia que lado debe abrir (alejandose del jugador).
-        if (!sentidoCalculado)
-            CalcularSentido();
-
         // La puerta se abre si el jugador esta dentro del radio, medido desde el
         // centro de la puerta CERRADA (fijo, para que no oscile al abrirse).
         float distancia = Vector3.Distance(centroReferencia, jugador.position);
         bool antes = estaAbierta;
         estaAbierta = distancia <= distanciaApertura;
 
-        if (debug && (antes != estaAbierta || Time.frameCount % 30 == 0))
-            Debug.Log($"[opendoor] '{name}': distancia={distancia:F2} umbral={distanciaApertura} abierta={estaAbierta}");
+        // Al empezar a abrir (y solo con la puerta practicamente cerrada) recalculamos
+        // hacia que lado abrir, para que SIEMPRE se aleje del jugador venga por donde venga.
+        if (!antes && estaAbierta && apertura < 0.05f)
+            CalcularSentido();
+
+        if (debug && antes != estaAbierta)
+            Debug.Log($"[opendoor] '{name}': distancia={distancia:F2} abierta={estaAbierta} signo={signo}");
 
         // Progreso suave 0..1 con aceleracion y desaceleracion naturales.
         float objetivo = estaAbierta ? 1f : 0f;
@@ -123,8 +126,6 @@ public class opendoor : MonoBehaviour
         // Si al girar +angulo el borde libre iria hacia el mismo lado que el jugador,
         // invertimos para que abra hacia el lado contrario.
         signo = (Mathf.Sign(mueveHaciaNormal) == Mathf.Sign(jugadorEnNormal)) ? -1f : 1f;
-        if (invertirGiro) signo = -signo;
-        sentidoCalculado = true;
     }
 
     private static Vector3 RotarPunto(Vector3 punto, Vector3 pivote, Vector3 eje, float grados)
