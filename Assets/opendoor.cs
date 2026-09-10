@@ -94,7 +94,8 @@ public class opendoor : MonoBehaviour
 
         if (debug)
             Debug.Log($"[opendoor] '{name}': modo={modo}, mallas={renderers.Length}, " +
-                      $"ancho={anchoPuerta:F2}, jugador={(jugador != null ? jugador.name : "NULL")}");
+                      $"colliders={colliders.Length}, ancho={anchoPuerta:F2}, " +
+                      $"jugador={(jugador != null ? jugador.name : "NULL")}");
     }
 
     void Update()

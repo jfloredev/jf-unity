@@ -1,12 +1,14 @@
 using UnityEngine;
 
-// Asigna automaticamente el componente "opendoor" a todas las puertas de la escena
-// (objetos cuyo nombre contiene "door" o "puerta") al iniciar el juego, sin tener
-// que configurarlas una por una en el Inspector.
+// Asigna automaticamente el componente "opendoor" a cada PUERTA INDIVIDUAL de la
+// escena al iniciar el juego. En modelos Revit las puertas se agrupan por categoria
+// ("Puertas (16)") y por familia ("Entrance door (2)"); esos son contenedores, no
+// puertas reales. Las puertas reales son las instancias, que tienen un id entre
+// corchetes en el nombre (p. ej. "Entrance door [423107]"). Por eso solo tomamos los
+// objetos cuyo nombre contiene "[" ademas de una palabra clave de puerta.
 public static class AutoPuertas
 {
-    // Palabras clave que identifican a una puerta por su nombre.
-    private static readonly string[] claves = { "door", "puerta" };
+    private static readonly string[] claves = { "door", "puerta", "slider", "pocket", "flush" };
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void ConfigurarPuertas()
@@ -16,18 +18,16 @@ public static class AutoPuertas
         int contador = 0;
         foreach (Transform t in todos)
         {
-            if (!EsPuerta(t.name)) continue;
-            if (t.GetComponent<opendoor>() != null) continue;
+            string n = t.name.ToLowerInvariant();
 
-            // Solo se asigna al objeto mas alto de la jerarquia: si un padre tambien
-            // es puerta, lo saltamos para no mover partes anidadas por duplicado.
-            if (PadreEsPuerta(t)) continue;
+            if (!EsPuerta(n)) continue;
+            if (!n.Contains("[")) continue;              // solo instancias, no grupos de Revit
+            if (t.GetComponent<opendoor>() != null) continue;
 
             opendoor puerta = t.gameObject.AddComponent<opendoor>();
 
-            // Las puertas tipo "slider/corrediza" se deslizan; el resto son batientes.
-            string n = t.name.ToLowerInvariant();
-            if (n.Contains("slider") || n.Contains("corred") || n.Contains("pocket"))
+            // Las tipo "slider/pocket/corrediza" se deslizan; el resto son batientes.
+            if (n.Contains("slider") || n.Contains("pocket") || n.Contains("corred"))
                 puerta.modo = opendoor.ModoPuerta.Corrediza;
             else
                 puerta.modo = opendoor.ModoPuerta.Batiente;
@@ -41,16 +41,8 @@ public static class AutoPuertas
 
     private static bool EsPuerta(string nombre)
     {
-        string n = nombre.ToLowerInvariant();
         foreach (string clave in claves)
-            if (n.Contains(clave)) return true;
-        return false;
-    }
-
-    private static bool PadreEsPuerta(Transform t)
-    {
-        for (Transform p = t.parent; p != null; p = p.parent)
-            if (EsPuerta(p.name)) return true;
+            if (nombre.Contains(clave)) return true;
         return false;
     }
 }
