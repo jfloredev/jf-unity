@@ -29,6 +29,9 @@ public class opendoor : MonoBehaviour
     [Tooltip("Voltea el lado de la bisagra (batiente) o el sentido del deslizamiento (corrediza).")]
     public bool invertir = false;
 
+    [Tooltip("Desactiva la colision de la puerta mientras esta abierta para poder cruzar.")]
+    public bool atravesarAlAbrir = true;
+
     [Header("Deteccion del jugador")]
     [Tooltip("Distancia (en unidades) a la que la puerta empieza a abrirse.")]
     public float distanciaApertura = 3.0f;
@@ -40,6 +43,8 @@ public class opendoor : MonoBehaviour
     public bool debug = true;
 
     private Renderer[] renderers;
+    private Collider[] colliders;     // colisiones de la puerta (se apagan al abrir)
+    private bool colisionActiva = true;
     private Vector3 centroReferencia; // centro de la puerta cerrada (para medir distancia)
     private Vector3 ejeAncho;         // eje horizontal a lo largo del ancho de la puerta
     private Vector3 normalPared;      // eje que atraviesa el hueco de la puerta
@@ -59,6 +64,7 @@ public class opendoor : MonoBehaviour
     void Start()
     {
         renderers = GetComponentsInChildren<Renderer>(true);
+        colliders = GetComponentsInChildren<Collider>(true);
 
         Bounds b = CalcularBounds();
         centroReferencia = b.center;
@@ -120,6 +126,18 @@ public class opendoor : MonoBehaviour
             AplicarGiro();
         else
             AplicarDeslizamiento();
+
+        // La puerta bloquea el paso solo cuando esta practicamente cerrada.
+        if (atravesarAlAbrir)
+            ActualizarColision(apertura < 0.1f);
+    }
+
+    private void ActualizarColision(bool bloquear)
+    {
+        if (bloquear == colisionActiva) return;
+        colisionActiva = bloquear;
+        foreach (Collider c in colliders)
+            if (c != null) c.enabled = bloquear;
     }
 
     private void AplicarGiro()
