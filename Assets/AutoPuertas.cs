@@ -13,6 +13,7 @@ public static class AutoPuertas
     {
         Transform[] todos = Object.FindObjectsByType<Transform>(FindObjectsInactive.Include, FindObjectsSortMode.None);
 
+        int contador = 0;
         foreach (Transform t in todos)
         {
             if (!EsPuerta(t.name)) continue;
@@ -23,7 +24,11 @@ public static class AutoPuertas
             if (PadreEsPuerta(t)) continue;
 
             t.gameObject.AddComponent<opendoor>();
+            contador++;
+            Debug.Log($"[AutoPuertas] Puerta configurada: '{t.name}'");
         }
+
+        Debug.Log($"[AutoPuertas] Total de puertas configuradas: {contador}");
     }
 
     private static bool EsPuerta(string nombre)
