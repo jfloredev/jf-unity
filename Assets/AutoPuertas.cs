@@ -23,9 +23,17 @@ public static class AutoPuertas
             // es puerta, lo saltamos para no mover partes anidadas por duplicado.
             if (PadreEsPuerta(t)) continue;
 
-            t.gameObject.AddComponent<opendoor>();
+            opendoor puerta = t.gameObject.AddComponent<opendoor>();
+
+            // Las puertas tipo "slider/corrediza" se deslizan; el resto son batientes.
+            string n = t.name.ToLowerInvariant();
+            if (n.Contains("slider") || n.Contains("corred") || n.Contains("pocket"))
+                puerta.modo = opendoor.ModoPuerta.Corrediza;
+            else
+                puerta.modo = opendoor.ModoPuerta.Batiente;
+
             contador++;
-            Debug.Log($"[AutoPuertas] Puerta configurada: '{t.name}'");
+            Debug.Log($"[AutoPuertas] Puerta configurada: '{t.name}' -> {puerta.modo}");
         }
 
         Debug.Log($"[AutoPuertas] Total de puertas configuradas: {contador}");
